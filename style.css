@@ -1,0 +1,503 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #333;
+    font-family: 'Arial', sans-serif;
+    color: white;
+}
+
+#game-container {
+    text-align: center;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+#btn-fullscreen-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 5px;
+    padding: 5px 10px;
+    cursor: pointer;
+    z-index: 10000;
+    font-size: 24px;
+    line-height: 1;
+    transition: background 0.3s;
+}
+
+#btn-fullscreen-toggle:hover {
+    background: rgba(0, 0, 0, 0.6);
+}
+
+#scoreboard {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    font-size: 48px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    z-index: 5;
+    pointer-events: none;
+}
+
+#timer {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 32px;
+    color: white;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 15px;
+    border-radius: 5px;
+    font-family: monospace;
+    z-index: 5;
+    pointer-events: none;
+}
+
+.score {
+    color: white; /* Default color, overridden by ids */
+}
+
+#game-over-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 20;
+}
+
+#winner-text {
+    font-size: 64px;
+    color: white;
+    margin-bottom: 30px;
+    text-shadow: 0 0 10px gold;
+}
+
+#score-red {
+    color: #ff4444;
+}
+
+#score-blue {
+    color: #4444ff;
+}
+
+canvas {
+    background-color: #333; /* Match body background so grass is only on field */
+    display: block;
+    margin: 0 auto; /* Center the canvas if needed, though flex handles it */
+}
+
+#controls-hint {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #ccc;
+}
+
+#menu-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    overflow-y: auto; /* Allow scrolling if content is too tall */
+}
+
+#menu-overlay h1 {
+    font-size: 64px;
+    margin-bottom: 40px;
+    color: white;
+    text-shadow: 2px 2px 4px #000;
+}
+
+.menu-btn {
+    padding: 15px 30px;
+    margin: 10px;
+    font-size: 24px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.menu-btn:hover {
+    background-color: #45a049;
+}
+
+.menu-btn.small {
+    font-size: 18px;
+    padding: 10px 20px;
+    background-color: #666;
+}
+
+.join-container {
+    margin: 10px;
+}
+
+.team-config {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 20px;
+}
+
+.team-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0,0,0,0.5);
+    padding: 20px;
+    border-radius: 10px;
+    min-width: 200px;
+}
+
+.counter-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin: 10px 0;
+}
+
+.arrow-btn {
+    background: none;
+    border: none;
+    font-size: 40px;
+    cursor: pointer;
+    padding: 0 10px;
+    transition: color 0.2s, transform 0.1s;
+    line-height: 1;
+}
+
+.arrow-btn:hover {
+    transform: scale(1.2);
+}
+
+.arrow-btn:active {
+    transform: scale(0.95);
+}
+
+.arrow-btn:disabled {
+    color: #666 !important;
+    cursor: default;
+    transform: none;
+    opacity: 0.5;
+}
+
+#btn-prev-red, #btn-next-red {
+    color: #ff4444;
+}
+
+#btn-prev-blue, #btn-next-blue {
+    color: #4444ff;
+}
+
+.counter-value {
+    font-size: 32px;
+    font-weight: bold;
+    min-width: 30px;
+    text-align: center;
+}
+
+.small-text {
+    font-size: 14px;
+    color: #aaa;
+    margin-top: 5px;
+}
+
+#lobby-teams {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    width: 100%;
+    max-width: 800px;
+    margin-bottom: 20px;
+}
+
+.lobby-col {
+    flex: 1;
+    background: rgba(0,0,0,0.5);
+    padding: 15px;
+    border-radius: 10px;
+    min-height: 200px;
+}
+
+.player-list {
+    margin: 10px 0;
+    min-height: 100px;
+}
+
+.lobby-item {
+    background: rgba(255,255,255,0.1);
+    padding: 8px;
+    margin: 5px 0;
+    border-radius: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.lobby-action-btn {
+    background: #666;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.lobby-action-btn:hover {
+    background: #888;
+}
+
+#room-code-input {
+    padding: 15px;
+    font-size: 24px;
+    border-radius: 5px;
+    border: none;
+    width: 200px;
+    text-align: center;
+    text-transform: uppercase;
+    margin-right: 10px;
+}
+
+#multiplayer-menu, #lobby-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+#display-room-code {
+    color: #4CAF50;
+    font-family: monospace;
+    font-size: 1.2em;
+}
+
+/* Mobile Controls */
+#mobile-controls {
+    position: fixed; /* Changed from absolute to fixed */
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999; /* Increased z-index */
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-bottom: env(safe-area-inset-bottom, 10px); /* Use safe area or small padding */
+    box-sizing: border-box;
+}
+
+#joystick-area {
+    width: 50%;
+    height: 100%; /* Occupy full height to ensure touch detection */
+    position: relative;
+    pointer-events: none;
+}
+
+#joystick-base {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    width: 100px;
+    height: 100px;
+    background: rgba(255, 255, 255, 0.5); /* More visible */
+    border: 4px solid rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    touch-action: none;
+    pointer-events: auto;
+}
+
+#joystick-stick {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 50px;
+    height: 50px;
+    background: #fff; /* Solid white */
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+#action-area {
+    width: 50%;
+    height: 100%; /* Occupy full height */
+    position: relative;
+    pointer-events: none;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    padding-right: 10px;
+    padding-bottom: 10px;
+}
+
+#btn-kick {
+    width: 110px;
+    height: 110px;
+    background: rgba(255, 68, 68, 0.8); /* More visible */
+    border: 6px solid rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    color: white;
+    font-weight: bold;
+    font-size: 16px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    outline: none;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    pointer-events: auto;
+}
+
+#btn-kick:active {
+    background: rgba(255, 68, 68, 0.8);
+    transform: scale(0.95);
+}
+
+/* Responsive adjustments for mobile/small screens */
+@media (max-height: 600px), (max-width: 600px) {
+    #menu-overlay {
+        justify-content: flex-start;
+        padding: 20px 0;
+    }
+
+    #menu-overlay h1 {
+        font-size: 40px;
+        margin-bottom: 20px;
+        margin-top: 20px;
+    }
+
+    #singleplayer-setup h2 {
+        font-size: 24px;
+        margin: 10px 0;
+    }
+
+    .team-config {
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .team-col {
+        padding: 10px;
+        min-width: 140px;
+    }
+
+    .counter-value {
+        font-size: 24px;
+    }
+
+    .arrow-btn {
+        font-size: 30px;
+    }
+
+    .menu-btn {
+        padding: 10px 20px;
+        font-size: 18px;
+        margin: 5px;
+    }
+    
+    /* Ensure buttons are visible at the bottom */
+    #singleplayer-setup {
+        padding-bottom: 50px;
+        text-align: center;
+    }
+}
+
+#singleplayer-setup {
+    text-align: center;
+}
+
+#controller-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 8;
+    text-align: center;
+    padding: 20px;
+    pointer-events: none;
+}
+
+.controller-hud {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+#controller-score {
+    font-size: 72px;
+    font-weight: bold;
+    text-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+}
+
+#controller-time {
+    font-size: 48px;
+    font-family: 'Arial', sans-serif;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 10px 25px;
+    border-radius: 10px;
+}
+
+.controller-hint {
+    font-size: 18px;
+    color: #dddddd;
+    max-width: 420px;
+}
+
+body.controller-mode #scoreboard,
+body.controller-mode #timer,
+body.controller-mode #btn-fullscreen-toggle,
+body.controller-mode canvas {
+    display: none !important;
+}
+
+body.controller-mode #controller-overlay {
+    display: flex !important;
+}
+
+body.controller-mode #btn-toggle-controls {
+    display: none !important;
+}

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Juego de Fútbol 2D</title>
+    <link rel="stylesheet" href="style.css?v=2">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div id="game-container">
+        <button id="btn-fullscreen-toggle">⛶</button>
+        <div id="timer">00:00</div>
+        <div id="scoreboard">
+            <span id="score-red" class="score">0</span> - <span id="score-blue" class="score">0</span>
+        </div>
+
+        <div id="game-over-overlay" style="display: none;">
+            <h1 id="winner-text">¡Ganador!</h1>
+            <button id="btn-return-setup" class="menu-btn">Volver a Configuración</button>
+        </div>
+
+        <div id="menu-overlay">
+            <h1>Fútbol 2D</h1>
+            <!-- Main Menu -->
+            <div id="main-menu">
+                <button id="btn-singleplayer" class="menu-btn">Jugar contra la CPU</button>
+                <button id="btn-multiplayer" class="menu-btn">Multijugador Online</button>
+            </div>
+            
+            <!-- Single Player Setup -->
+            <div id="singleplayer-setup" style="display: none;">
+                <h2>Configuración de Partido</h2>
+                <div class="team-config">
+                    <div class="team-col">
+                        <h3 style="color: #ff4444;">Equipo Rojo</h3>
+                        <label>Jugadores</label>
+                        <div class="counter-control">
+                            <button id="btn-prev-red" class="arrow-btn">◄</button>
+                            <span id="sp-red-count" class="counter-value">1</span>
+                            <button id="btn-next-red" class="arrow-btn">►</button>
+                        </div>
+                        <p class="small-text">(Tú + Bots)</p>
+                    </div>
+                    <div class="team-col">
+                        <h3 style="color: #4444ff;">Equipo Azul</h3>
+                        <label>Jugadores</label>
+                        <div class="counter-control">
+                            <button id="btn-prev-blue" class="arrow-btn">◄</button>
+                            <span id="sp-blue-count" class="counter-value">1</span>
+                            <button id="btn-next-blue" class="arrow-btn">►</button>
+                        </div>
+                        <p class="small-text">(Bots)</p>
+                    </div>
+                </div>
+                
+                <div class="config-row" style="text-align: center; margin-bottom: 20px;">
+                    <h3>Duración del Partido</h3>
+                    <div class="counter-control">
+                        <button id="btn-prev-time" class="arrow-btn">◄</button>
+                        <span id="time-selection" class="counter-value">3 min</span>
+                        <button id="btn-next-time" class="arrow-btn">►</button>
+                    </div>
+                </div>
+
+                <button id="btn-start-sp" class="menu-btn">Jugar</button>
+                <button id="btn-back-sp" class="menu-btn small">Volver</button>
+            </div>
+
+            <!-- Multiplayer Menu -->
+            <div id="multiplayer-menu" style="display: none;">
+                <button id="btn-create-room" class="menu-btn">Crear Sala</button>
+                <button id="btn-create-display-room" class="menu-btn">Crear Sala (Modo Pantalla)</button>
+                <div class="join-container">
+                    <input type="text" id="room-code-input" placeholder="Código de Sala" maxlength="6">
+                    <button id="btn-join-room" class="menu-btn">Unirse</button>
+                </div>
+                <button id="btn-back-menu" class="menu-btn small">Volver</button>
+            </div>
+
+            <button id="btn-toggle-controls" class="menu-btn small" style="margin-top: 10px; font-size: 14px;">Mostrar/Ocultar Controles Táctiles</button>
+
+            <!-- Lobby Screen -->
+            <div id="lobby-screen" style="display: none;">
+                <h2>Sala: <span id="display-room-code">...</span></h2>
+                
+                <div id="lobby-teams">
+                    <div class="lobby-col" id="lobby-red">
+                        <h3 style="color: #ff4444;">Equipo Rojo</h3>
+                        <div class="player-list" id="list-red"></div>
+                        <button id="btn-add-bot-red" class="lobby-action-btn">+ Bot</button>
+                    </div>
+                    <div class="lobby-col" id="lobby-blue">
+                        <h3 style="color: #4444ff;">Equipo Azul</h3>
+                        <div class="player-list" id="list-blue"></div>
+                        <button id="btn-add-bot-blue" class="lobby-action-btn">+ Bot</button>
+                    </div>
+                </div>
+
+                <p id="lobby-status">Esperando jugadores...</p>
+                <div id="host-controls" style="display: none;">
+                    <button id="btn-start-mp" class="menu-btn">Iniciar Partido</button>
+                </div>
+                <button id="btn-cancel-lobby" class="menu-btn small">Salir</button>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="controller-overlay" style="display: none;">
+            <div class="controller-hud">
+                <div id="controller-score">0 - 0</div>
+                <div id="controller-time">00:00</div>
+            </div>
+            <p class="controller-hint">Mira la pantalla principal para seguir la partida.</p>
+        </div>
+        
+        <!-- Mobile Controls -->
+        <div id="mobile-controls" style="display: none;">
+            <div id="joystick-area">
+                <div id="joystick-base">
+                    <div id="joystick-stick"></div>
+                </div>
+            </div>
+            <div id="action-area">
+                <button id="btn-kick">CHUTAR</button>
+            </div>
+        </div>
+    </div>
+    <script src="script.js?v=2"></script>
+</body>
+</html>
