@@ -9,18 +9,18 @@ const FIELD_WIDTH = 800;
 const FIELD_HEIGHT = 500;
 let FIELD_OFFSET_X = 0;
 let FIELD_OFFSET_Y = 0;
-const GOAL_HEIGHT = 125;
+const GOAL_HEIGHT = 150; // Portería más grande
 let renderScale = 1;
 
 const GOAL_DEPTH = 40;
 const PLAYER_RADIUS = 15;
 const BALL_RADIUS = 8;
 const GOAL_WIDTH = 10; // Used for post thickness now
-const FRICTION = 0.975;
+const FRICTION = 0.98;
 const PLAYER_SPEED = 2;
 const KICK_POWER = 8;
 const AI_SPEED = 2.0;
-const KICK_REACH = 5;
+const KICK_REACH = 12; // Increased reach for easier hitting
 
 const PEER_CONFIG = {
     host: '0.peerjs.com',
@@ -36,6 +36,123 @@ const INTERPOLATION_DELAY_MS = 120;
 const MAX_STATE_BUFFER = 30;
 
 const stateBuffer = [];
+
+// ------------------ SETTINGS PERSISTENCE ------------------
+const SETTINGS_KEY = 'furbo2d_settings';
+let userSettings = {
+    username: '',
+    favoriteNumber: null,
+    showTouchControls: true // Activado por defecto
+};
+
+function loadSettings() {
+    let raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) {
+        // Fallback cookie
+        const cookieMatch = document.cookie.match(/furbo2d_settings=([^;]+)/);
+        if (cookieMatch) raw = decodeURIComponent(cookieMatch[1]);
+    }
+    if (raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            // Si la configuración almacenada no tiene la clave, mantenemos true por defecto
+            userSettings = { ...userSettings, ...parsed };
+            if (parsed.showTouchControls === undefined) {
+                userSettings.showTouchControls = true;
+            }
+        } catch (e) { /* ignore parse errors */ }
+    }
+}
+
+function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(userSettings));
+    document.cookie = 'furbo2d_settings=' + encodeURIComponent(JSON.stringify(userSettings)) + ';path=/;max-age=31536000';
+}
+
+function applySettingsToUI() {
+    const usernameInput = document.getElementById('setting-username');
+    const favNumberInput = document.getElementById('setting-fav-number');
+    const showTouchCheckbox = document.getElementById('setting-show-touch');
+    if (!usernameInput) return; // UI not created yet
+    usernameInput.value = userSettings.username || '';
+    favNumberInput.value = userSettings.favoriteNumber !== null ? userSettings.favoriteNumber : '';
+    showTouchCheckbox.checked = !!userSettings.showTouchControls;
+}
+
+function applySettingsGameplayHooks() {
+    // Touch controls preference overrides auto-detection
+    if (userSettings.showTouchControls) {
+        toggleMobileControls(true);
+    } else {
+        const controls = document.getElementById('mobile-controls');
+        if (controls) controls.style.display = 'none';
+        isMobile = false;
+    }
+}
+
+function openSettingsPanel() {
+    const overlay = document.getElementById('settings-overlay');
+    const menu = document.getElementById('menu-overlay');
+    if (overlay && menu) {
+        menu.style.display = 'none';
+        overlay.style.display = 'flex';
+        applySettingsToUI();
+    }
+}
+
+function closeSettingsPanel() {
+    const overlay = document.getElementById('settings-overlay');
+    const menu = document.getElementById('menu-overlay');
+    const err = document.getElementById('settings-error');
+    if (err) err.style.display = 'none';
+    if (overlay && menu) {
+        overlay.style.display = 'none';
+        menu.style.display = 'flex';
+    }
+}
+
+function validateAndSaveSettings() {
+    const usernameInput = document.getElementById('setting-username');
+    const favNumberInput = document.getElementById('setting-fav-number');
+    const showTouchCheckbox = document.getElementById('setting-show-touch');
+    const errorBox = document.getElementById('settings-error');
+    if (!usernameInput || !favNumberInput || !showTouchCheckbox) return;
+
+    const username = (usernameInput.value || '').trim();
+    if (username.length > 16) {
+        errorBox.innerText = 'El nombre supera 16 caracteres.';
+        errorBox.style.display = 'block';
+        return;
+    }
+
+    let favNumberRaw = favNumberInput.value.trim();
+    let favNumber = favNumberRaw === '' ? null : parseInt(favNumberRaw, 10);
+    if (favNumber !== null && (isNaN(favNumber) || favNumber < 1 || favNumber > 25)) {
+        errorBox.innerText = 'Número favorito debe estar entre 1 y 25.';
+        errorBox.style.display = 'block';
+        return;
+    }
+
+    userSettings.username = username;
+    userSettings.favoriteNumber = favNumber;
+    userSettings.showTouchControls = !!showTouchCheckbox.checked;
+    saveSettings();
+    applySettingsGameplayHooks();
+    closeSettingsPanel();
+}
+
+// Initial load
+loadSettings();
+document.addEventListener('DOMContentLoaded', () => {
+    applySettingsToUI();
+    applySettingsGameplayHooks();
+    const btnGear = document.getElementById('btn-open-settings');
+    const btnSave = document.getElementById('btn-save-settings');
+    const btnClose = document.getElementById('btn-close-settings');
+    if (btnGear) btnGear.addEventListener('click', openSettingsPanel);
+    if (btnSave) btnSave.addEventListener('click', validateAndSaveSettings);
+    if (btnClose) btnClose.addEventListener('click', closeSettingsPanel);
+});
 
 const quantize = (value, decimals = 2) => {
     const factor = Math.pow(10, decimals);
@@ -77,6 +194,8 @@ const serializeMotion = (entity) => {
 const serializePlayerState = (player) => ({
     id: player.ownerId || player.id || `player-${player.team}-${player.number}`,
     team: player.team,
+    number: player.number,
+    role: player.role,
     ...serializeMotion(player)
 });
 
@@ -207,6 +326,8 @@ function blendSnapshots(fromState, toState, alpha) {
         }
         blendMotion(fromPlayer, toPlayer, entity);
         entity.team = toPlayer.team || entity.team;
+        if (typeof toPlayer.number === 'number') entity.number = toPlayer.number;
+        if (toPlayer.role) entity.role = toPlayer.role;
     });
 }
 
@@ -288,7 +409,7 @@ class Ball {
                     // GOAL! (Fully crossed line)
                     scoreBlue++;
                     updateScoreboard();
-                    resetPositions();
+                    triggerGoal('blue');
                     return;
                 }
                 // Bounce off back of net (optional, but good for realism if it doesn't trigger goal immediately)
@@ -318,7 +439,7 @@ class Ball {
                     // GOAL!
                     scoreRed++;
                     updateScoreboard();
-                    resetPositions();
+                    triggerGoal('red');
                     return;
                 }
                 // Bounce off back of net
@@ -374,6 +495,13 @@ class Player {
         this.targetY = y;
         this.isKicking = false;
         this.kickVisualTimer = 0;
+        this.shockwaveTimer = 0;
+        this.wasKicking = false;
+        
+        // New AI State
+        this.wantsToKick = false;
+        this.kickTargetX = 0;
+        this.kickTargetY = 0;
     }
 
     reset() {
@@ -403,6 +531,10 @@ class Player {
             this.handleInput(inputKeys);
             
             // Visual Kick State
+            if (inputKeys.space && !this.wasKicking) {
+                this.shockwaveTimer = 20;
+            }
+            this.wasKicking = inputKeys.space;
             this.isKicking = inputKeys.space;
 
             // Kicking Logic for Human
@@ -414,7 +546,22 @@ class Player {
 
             if (inputKeys.space && this.kickCooldown <= 0 && distance < canKickDist) {
                 const angle = Math.atan2(dy, dx);
-                const currentKickPower = (this.role === 'goalie') ? KICK_POWER * 1.25 : KICK_POWER;
+                let currentKickPower = (this.role === 'goalie') ? KICK_POWER * 1.25 : KICK_POWER;
+
+                // Distance-based power modulation
+                // Closer = Stronger, Farther = Weaker
+                const minDist = PLAYER_RADIUS + BALL_RADIUS;
+                const maxDist = canKickDist;
+                let powerFactor = 1.0;
+                
+                if (distance > minDist) {
+                    // Linear falloff from 1.0 to 0.2
+                    powerFactor = 1.0 - ((distance - minDist) / (maxDist - minDist)) * 0.8;
+                }
+                powerFactor = Math.max(0.2, Math.min(1.0, powerFactor));
+                
+                currentKickPower *= powerFactor;
+
                 ball.vx = Math.cos(angle) * currentKickPower;
                 ball.vy = Math.sin(angle) * currentKickPower;
                 this.kickCooldown = 10; // 10 frames at 60 FPS 
@@ -571,8 +718,26 @@ class Player {
             // Bounce ball away
             // Calculate impact force based on player speed and existing ball speed
             const playerSpeed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
-            const impactForce = Math.max(playerSpeed * 1.1, 2); // Reduced bounce
             
+            // Dribbling logic:
+            // If player is moving, impart velocity slightly higher than player speed.
+            // If player is stationary (or very slow), act as a wall (bounce).
+            
+            let impactForce;
+            if (playerSpeed > 0.1) {
+                // Player is moving: Push the ball
+                // Force is proportional to player speed, allowing for close dribbling
+                impactForce = playerSpeed * 1.1; 
+            } else {
+                // Player is stationary: Bounce the ball
+                // Preserve some of the ball's existing speed but dampen it
+                const ballSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+                impactForce = ballSpeed * 0.5; 
+            }
+            
+            // Ensure a tiny minimum movement to avoid sticking, but much less than before
+            impactForce = Math.max(impactForce, 0.1);
+
             ball.vx = Math.cos(angle) * impactForce;
             ball.vy = Math.sin(angle) * impactForce;
         }
@@ -582,27 +747,34 @@ class Player {
             const kickAreaRadius = PLAYER_RADIUS + BALL_RADIUS + KICK_REACH;
             const canKickDist = kickAreaRadius + BALL_RADIUS;
             
-            if (distance < canKickDist && this.kickCooldown <= 0) {
-                // Simple AI kick if close to goal or clearing
-                let targetX = this.team === 'red' ? FIELD_WIDTH : 0;
-                // Add MORE randomness to AI aim
-                let targetY = FIELD_HEIGHT / 2 + (Math.random() - 0.5) * (FIELD_HEIGHT * 0.8); 
+            // Only kick if AI wants to AND is close enough
+            if (this.wantsToKick && distance < canKickDist && this.kickCooldown <= 0) {
+                // AI now kicks towards its determined target
+                const kickAngle = Math.atan2(this.kickTargetY - this.y, this.kickTargetX - this.x);
+                let currentKickPower = (this.role === 'goalie') ? KICK_POWER * 1.25 : KICK_POWER;
+
+                // Distance-based power modulation for AI too
+                const minDist = PLAYER_RADIUS + BALL_RADIUS;
+                const maxDist = canKickDist;
+                let powerFactor = 1.0;
                 
-                // Sometimes kick in a completely random direction (panic)
-                if (Math.random() < 0.1) {
-                    targetY = Math.random() * FIELD_HEIGHT;
-                    targetX = Math.random() * FIELD_WIDTH;
+                if (distance > minDist) {
+                    powerFactor = 1.0 - ((distance - minDist) / (maxDist - minDist)) * 0.8;
                 }
+                powerFactor = Math.max(0.2, Math.min(1.0, powerFactor));
                 
-                const kickAngle = Math.atan2(targetY - this.y, targetX - this.x);
-                const currentKickPower = (this.role === 'goalie') ? KICK_POWER * 1.25 : KICK_POWER;
+                currentKickPower *= powerFactor;
+
                 ball.vx = Math.cos(kickAngle) * currentKickPower;
                 ball.vy = Math.sin(kickAngle) * currentKickPower;
                 this.kickCooldown = 60; // 60 frames at 60 FPS (1 second cooldown)
                 this.kickVisualTimer = 15; // 15 frames at 60 FPS
+                this.shockwaveTimer = 20;
+                this.wantsToKick = false; // Reset flag
             }
         }
 
+        if (this.shockwaveTimer > 0) this.shockwaveTimer -= deltaTime;
         if (this.kickCooldown > 0) this.kickCooldown -= deltaTime;
     }
 
@@ -645,7 +817,9 @@ class Player {
         
         // Update AI decisions periodically
         if (this.aiTimer <= 0) {
-            this.aiTimer = 10 + Math.random() * 10; // 10-20 frames at 60 FPS (0.17-0.33 seconds)
+            this.aiTimer = 5 + Math.random() * 5; // Faster updates: 5-10 frames (0.08-0.16s) for better responsiveness
+
+            this.wantsToKick = false; // Reset kick desire
 
             // 1. Identify closest teammate to ball
             let myTeammates = allPlayers.filter(p => p.team === this.team);
@@ -676,7 +850,7 @@ class Player {
                 
                 // Imperfection: Add random noise to where they think the ball is (Human error)
                 // +/- 40px error range, makes them leave gaps
-                const errorY = (Math.random() - 0.5) * 80; 
+                const errorY = (Math.random() - 0.5) * 40; 
                 
                 // 1. Basic Positioning
                 // If losing, play further forward (Sweeper Keeper default pos)
@@ -696,8 +870,8 @@ class Player {
                 const distToBall = Math.hypot(ball.x - this.x, ball.y - this.y);
                 
                 // Rush more if losing
-                let rushThreshold = 250; 
-                if (amILosing) rushThreshold = 500; // Much more aggressive if losing
+                let rushThreshold = 200; 
+                if (amILosing) rushThreshold = 400; // Much more aggressive if losing
 
                 // Only rush if ball is on our side
                 // If losing, extend "our side" definition to almost midfield
@@ -709,12 +883,183 @@ class Player {
                 if (ballOnOurSide && distToBall < rushThreshold) {
                     this.targetX = ball.x;
                     this.targetY = ball.y;
+                    // Goalie clears the ball
+                    this.wantsToKick = true;
+                    this.kickTargetX = isRed ? FIELD_WIDTH : 0;
+                    this.kickTargetY = FIELD_HEIGHT / 2;
                 }
 
             } else if (amIClosest) {
-                // Attacker Logic: Chase Ball
-                this.targetX = ball.x;
-                this.targetY = ball.y;
+                // Attacker Logic: Chase Ball with positioning
+                const opponentGoalX = this.team === 'red' ? FIELD_WIDTH : 0;
+                
+                // Default Aim: Center of Goal (with some noise)
+                let aimTargetX = opponentGoalX;
+                let aimTargetY = FIELD_HEIGHT / 2;
+
+                const distToGoal = Math.abs(opponentGoalX - ball.x);
+
+                // Smart Shooting: If close, aim for corners
+                if (distToGoal < 300) {
+                    // Pick top or bottom corner based on y position
+                    aimTargetY = (ball.y < FIELD_HEIGHT/2) ? 
+                        (FIELD_HEIGHT/2 + GOAL_HEIGHT/2 - 15) : // Bottom corner
+                        (FIELD_HEIGHT/2 - GOAL_HEIGHT/2 + 15);  // Top corner
+                }
+
+                // Analyze Situation
+                let bestTeammate = null;
+                let bestPassScore = -1;
+                const opponents = allPlayers.filter(p => p.team !== this.team);
+                
+                // Check for Pass
+                if (distToGoal > 100) { // Don't pass if super close to goal
+                    myTeammates.forEach(tm => {
+                        if (tm === this) return;
+                        
+                        const tmDistToGoal = Math.abs(opponentGoalX - tm.x);
+                        const isForward = tmDistToGoal < distToGoal;
+                        const distToTm = Math.hypot(tm.x - ball.x, tm.y - ball.y);
+                        
+                        if (distToTm < 80 || distToTm > 500) return;
+
+                        // Line of Sight
+                        let blocked = false;
+                        for (let opp of opponents) {
+                            const l2 = distToTm * distToTm;
+                            if (l2 === 0) continue;
+                            const t = ((opp.x - ball.x) * (tm.x - ball.x) + (opp.y - ball.y) * (tm.y - ball.y)) / l2;
+                            const tClamped = Math.max(0, Math.min(1, t));
+                            const projX = ball.x + tClamped * (tm.x - ball.x);
+                            const projY = ball.y + tClamped * (tm.y - ball.y);
+                            const distToLine = Math.hypot(opp.x - projX, opp.y - projY);
+                            
+                            if (distToLine < PLAYER_RADIUS * 3) { 
+                                blocked = true;
+                                break;
+                            }
+                        }
+
+                        if (!blocked) {
+                            let score = 1000 - tmDistToGoal;
+                            if (!isForward) score /= 3; // Heavy penalty for backward pass
+                            
+                            // Bonus if teammate is very open (far from opponents)
+                            let nearestOppToTm = Infinity;
+                            opponents.forEach(opp => {
+                                const d = Math.hypot(opp.x - tm.x, opp.y - tm.y);
+                                if (d < nearestOppToTm) nearestOppToTm = d;
+                            });
+                            if (nearestOppToTm > 150) score += 200;
+
+                            if (score > bestPassScore) {
+                                bestPassScore = score;
+                                bestTeammate = tm;
+                            }
+                        }
+                    });
+                }
+
+                // Check Pressure
+                let nearestOpponentDist = Infinity;
+                let nearestOpponentToBall = Infinity;
+                opponents.forEach(p => {
+                    const d = Math.hypot(p.x - this.x, p.y - this.y);
+                    if (d < nearestOpponentDist) nearestOpponentDist = d;
+                    
+                    const dBall = Math.hypot(p.x - ball.x, p.y - ball.y);
+                    if (dBall < nearestOpponentToBall) nearestOpponentToBall = dBall;
+                });
+                const underPressure = nearestOpponentDist < 120;
+                const ballThreatened = nearestOpponentToBall < 200;
+
+                // Alignment Check
+                const dx = aimTargetX - ball.x;
+                const dy = aimTargetY - ball.y;
+                const distToTarget = Math.hypot(dx, dy);
+                const aimDirX = dx / distToTarget;
+                const aimDirY = dy / distToTarget;
+                
+                const pDx = ball.x - this.x;
+                const pDy = ball.y - this.y;
+                const angleToBall = Math.atan2(pDy, pDx);
+                const angleToTarget = Math.atan2(dy, dx);
+                let angleDiff = Math.abs(angleToBall - angleToTarget);
+                if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                const isAligned = angleDiff < (Math.PI / 4); // 45 degrees
+
+                // DECISION MAKING
+                let action = 'dribble'; // Default
+
+                // 1. Shoot?
+                if (distToGoal < 250 && isAligned) {
+                    action = 'shoot';
+                }
+                // 2. Pass?
+                else if (bestTeammate && bestPassScore > (1000 - distToGoal) + 100) {
+                    // Pass if teammate score is significantly better than my position
+                    action = 'pass';
+                }
+                // 3. Clear/Panic Shoot?
+                else if (underPressure && distToGoal < 400 && isAligned) {
+                    action = 'shoot';
+                }
+                
+                // EXECUTION
+                if (action === 'shoot') {
+                    this.targetX = ball.x;
+                    this.targetY = ball.y;
+                    this.wantsToKick = true;
+                    this.kickTargetX = aimTargetX;
+                    this.kickTargetY = aimTargetY;
+                } else if (action === 'pass') {
+                    this.targetX = ball.x;
+                    this.targetY = ball.y;
+                    this.wantsToKick = true;
+                    // Lead the pass
+                    this.kickTargetX = bestTeammate.x + bestTeammate.vx * 15;
+                    this.kickTargetY = bestTeammate.y + bestTeammate.vy * 15;
+                } else {
+                    // Dribble / Position
+                    
+                    // EMERGENCY / CONTEST: If ball is threatened or we are super close, don't back off!
+                    // If an opponent is close to the ball, we must contest it.
+                    // Also if we are already touching the ball, don't back off to "prep".
+                    const distToBall = Math.hypot(pDx, pDy);
+                    const touchingBall = distToBall < PLAYER_RADIUS + BALL_RADIUS + 5;
+                    
+                    if ((ballThreatened || touchingBall) && !isAligned) {
+                         // Just go for the ball to push it or contest it
+                         this.targetX = ball.x;
+                         this.targetY = ball.y;
+                         
+                         // If we are really close and facing roughly the wrong way, maybe kick it to clear/pass?
+                         // But for now, just pushing it is better than running away.
+                    }
+                    else if (isAligned) {
+                        // Dribble: Move towards goal through ball
+                        this.targetX = ball.x + aimDirX * 50;
+                        this.targetY = ball.y + aimDirY * 50;
+                        // Don't kick, just push
+                    } else {
+                        // Position: Move to prep point
+                        const approachDist = 60; 
+                        const prepX = ball.x - aimDirX * approachDist;
+                        const prepY = ball.y - aimDirY * approachDist;
+                        this.targetX = prepX;
+                        this.targetY = prepY;
+                        
+                        // Circle around ball if close (but not touching/threatened)
+                        if (distToBall < 80) {
+                            const cross = pDx * aimDirY - pDy * aimDirX;
+                            const side = cross > 0 ? 1 : -1;
+                            const perpX = -aimDirY;
+                            const perpY = aimDirX;
+                            this.targetX += perpX * side * 70;
+                            this.targetY += perpY * side * 70;
+                        }
+                    }
+                }
 
             } else {
                 // Support / Positioning Logic (Not closest)
@@ -756,10 +1101,10 @@ class Player {
                     const dx = this.x - p.x;
                     const dy = this.y - p.y;
                     const dist = Math.hypot(dx, dy);
-                    if (dist < 100 && dist > 0) { // 100px separation radius
-                        const force = (100 - dist) / 100;
-                        sepX += (dx / dist) * force * 50;
-                        sepY += (dy / dist) * force * 50;
+                    if (dist < 120 && dist > 0) { // 120px separation radius
+                        const force = (120 - dist) / 120;
+                        sepX += (dx / dist) * force * 60;
+                        sepY += (dy / dist) * force * 60;
                     }
                 }
             });
@@ -789,13 +1134,30 @@ class Player {
     }
 
     draw() {
-        // Indicator for human player
-        if (this.isHuman) {
-            // Draw kick range as white shadow
+        // Shockwave effect when kicking (for all players)
+        if (this.shockwaveTimer > 0) {
+            const maxRadius = PLAYER_RADIUS + BALL_RADIUS + KICK_REACH + 5;
+            const progress = 1 - (this.shockwaveTimer / 20);
+            
+            // Wave 1 (Outer - Dark Earth/Grey)
+            const radius1 = PLAYER_RADIUS + (maxRadius - PLAYER_RADIUS) * progress;
+            const alpha = (1 - progress) * 0.8; // Reduced opacity
+            
             ctx.beginPath();
-            ctx.arc(this.x, this.y, PLAYER_RADIUS + BALL_RADIUS + KICK_REACH, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; // White shadow
-            ctx.fill();
+            ctx.arc(this.x, this.y, radius1, 0, Math.PI * 2);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = `rgba(100, 100, 100, ${alpha})`; // Grey
+            ctx.stroke();
+            ctx.closePath();
+
+            // Wave 2 (Inner - Smaller ripple)
+            const radius2 = PLAYER_RADIUS + (maxRadius - PLAYER_RADIUS) * (progress * 0.6);
+            
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, radius2, 0, Math.PI * 2);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = `rgba(120, 120, 120, ${alpha})`; // Lighter grey
+            ctx.stroke();
             ctx.closePath();
         }
 
@@ -831,11 +1193,7 @@ class Player {
         }
         
         // Draw number or symbol
-        if (this.isKicking && Math.floor(Date.now() / 50) % 2 === 0) {
-            ctx.fillStyle = 'black';
-        } else {
-            ctx.fillStyle = 'white';
-        }
+        ctx.fillStyle = 'white';
         
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
@@ -1074,14 +1432,18 @@ function startGameHost() {
         if (c.open) c.send({ type: 'START', config: config });
     });
     
+    startCountdown(3);
     initGame('host', config);
 }
 
 function startGameClient(config) {
     gameMode = 'client';
     document.getElementById('menu-overlay').style.display = 'none';
+    // Start the render loop but freeze physics while countdown runs
     gameRunning = true;
+    countdownActive = true;
     lastTime = 0;
+    startCountdown(3);
     // Init game with config received from host
     initGame('client', config);
 }
@@ -1117,8 +1479,7 @@ function initGame(mode, config = null) {
         // Human
         const hostId = 'host';
         players.push(new Player(
-            FIELD_WIDTH * 0.1,
-            FIELD_HEIGHT * 0.5,
+            0, 0, // Position will be set by setupTeamFormation
             'red',
             true,
             derivePlayerNumber(hostId, 'red', 0),
@@ -1130,8 +1491,7 @@ function initGame(mode, config = null) {
         for(let i=1; i<redCount; i++) {
             const botId = `sp-red-${i}`;
             players.push(new Player(
-                FIELD_WIDTH * 0.2,
-                FIELD_HEIGHT * (0.2 + i*0.2),
+                0, 0, // Position will be set by setupTeamFormation
                 'red',
                 false,
                 derivePlayerNumber(botId, 'red', i),
@@ -1144,8 +1504,7 @@ function initGame(mode, config = null) {
         for(let i=0; i<blueCount; i++) {
             const botId = `sp-blue-${i}`;
             players.push(new Player(
-                FIELD_WIDTH * 0.8,
-                FIELD_HEIGHT * (0.2 + i*0.2),
+                0, 0, // Position will be set by setupTeamFormation
                 'blue',
                 false,
                 derivePlayerNumber(botId, 'blue', i),
@@ -1154,27 +1513,44 @@ function initGame(mode, config = null) {
             ));
         }
 
-        assignGoalies(players);
+        setupTeamFormation(players);
+        // Apply favorite number override to human host if set
+        if (userSettings.favoriteNumber) {
+            const human = players.find(p => p.isHuman && p.ownerId === 'host');
+            if (human) {
+                // Ensure uniqueness: if number already used, skip override
+                const taken = players.some(p => p !== human && p.number === userSettings.favoriteNumber);
+                if (!taken) human.number = userSettings.favoriteNumber;
+            }
+        }
 
     } else if (mode === 'host' || mode === 'client') {
         // Config: { red: [players], blue: [players] }
         // Reconstruct players from lobby config
         
-        const createTeam = (list, teamName, startX) => {
+        const createTeam = (list, teamName) => {
             if (!list) return;
             list.forEach((p, i) => {
                 const isHuman = p.type === 'human';
                 const ownerId = p.id;
-                const y = FIELD_HEIGHT * (0.2 + (i+1)*0.15);
                 const jersey = derivePlayerNumber(ownerId, teamName, i);
-                players.push(new Player(startX, y, teamName, isHuman, jersey, 'field', ownerId));
+                players.push(new Player(0, 0, teamName, isHuman, jersey, 'field', ownerId));
             });
         };
 
-        createTeam(config.red, 'red', FIELD_WIDTH * 0.1);
-        createTeam(config.blue, 'blue', FIELD_WIDTH * 0.9);
+        createTeam(config.red, 'red');
+        createTeam(config.blue, 'blue');
 
-        assignGoalies(players);
+        if (mode === 'host') {
+            setupTeamFormation(players);
+            if (userSettings.favoriteNumber) {
+                const humanHost = players.find(p => p.isHuman && p.ownerId === 'host');
+                if (humanHost) {
+                    const taken = players.some(p => p !== humanHost && p.number === userSettings.favoriteNumber);
+                    if (!taken) humanHost.number = userSettings.favoriteNumber;
+                }
+            }
+        }
     }
 
     document.getElementById('menu-overlay').style.display = 'none';
@@ -1187,21 +1563,81 @@ function initGame(mode, config = null) {
     }
 }
 
-function assignGoalies(playerList) {
-    const redTeam = playerList.filter(p => p.team === 'red');
-    const blueTeam = playerList.filter(p => p.team === 'blue');
+// Asignación de posiciones, roles y números
+function setupTeamFormation(playerList) {
+    const used = new Set();
+    const teams = {
+        red: playerList.filter(p => p.team === 'red'),
+        blue: playerList.filter(p => p.team === 'blue')
+    };
 
-    // Only assign goalies if BOTH teams have more than 1 player
-    redTeam.forEach(p => p.role = 'field');
-    blueTeam.forEach(p => p.role = 'field');
+    const processTeam = (arr, isRed) => {
+        if (!arr.length) return;
 
-    if (redTeam.length > 1 && blueTeam.length > 1) {
-        const rIdx = deterministicIndex(redTeam, 'red-goalie');
-        const bIdx = deterministicIndex(blueTeam, 'blue-goalie');
+        // 1. Shuffle to randomize who gets which slot (and thus who becomes goalie)
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
 
-        if (rIdx >= 0) redTeam[rIdx].role = 'goalie';
-        if (bIdx >= 0) blueTeam[bIdx].role = 'goalie';
-    }
+        // 2. Assign Positions & Roles
+        const forward = isRed ? 1 : -1;
+        const goalX = isRed ? 0 : FIELD_WIDTH;
+        
+        arr.forEach((p, i) => {
+            let tx, ty;
+            
+            // Index 0 is Goalie (Back) if we have enough players
+            if (i === 0 && arr.length > 1) {
+                // Goalie
+                p.role = 'goalie';
+                tx = goalX + forward * (FIELD_WIDTH * 0.1);
+                ty = FIELD_HEIGHT * 0.5;
+            } else {
+                // Field
+                p.role = 'field'; 
+                
+                // Formation: Vertical line at 0.35 * W
+                const fieldIndex = (arr.length > 1) ? i - 1 : i;
+                const fieldCount = (arr.length > 1) ? arr.length - 1 : arr.length;
+                
+                const xOffset = FIELD_WIDTH * 0.35;
+                tx = goalX + forward * xOffset;
+                
+                // Distribute Y evenly
+                const segment = FIELD_HEIGHT / (fieldCount + 1);
+                ty = segment * (fieldIndex + 1);
+            }
+            
+            p.x = tx;
+            p.y = ty;
+            p.startX = tx;
+            p.startY = ty;
+            
+            // Refine Field Role
+            if (p.role === 'field') {
+                const rolesPool = ['defender', 'attacker', 'field'];
+                p.role = rolesPool[Math.floor(Math.random() * rolesPool.length)];
+            }
+            
+            // Assign Unique Number
+            let num;
+            for (let attempt = 0; attempt < 50; attempt++) {
+                num = Math.floor(Math.random() * 25) + 1;
+                if (!used.has(num)) break;
+            }
+            if (used.has(num)) {
+                 for (let candidate = 1; candidate <= 25; candidate++) {
+                    if (!used.has(candidate)) { num = candidate; break; }
+                 }
+            }
+            used.add(num);
+            p.number = num;
+        });
+    };
+
+    processTeam(teams.red, true);
+    processTeam(teams.blue, false);
 }
 
 // Menu Navigation
@@ -1291,6 +1727,7 @@ btnNextTime.addEventListener('click', () => {
 });
 
 document.getElementById('btn-start-sp').addEventListener('click', () => {
+    startCountdown(3);
     initGame('singleplayer', {
         redCount: spRedValue,
         blueCount: spBlueValue,
@@ -1361,6 +1798,207 @@ function updateTimerDisplay() {
     }
 }
 
+// Goal animation state
+let goalAnimating = false;
+// Goal Overlay State
+let goalOverlayState = {
+    active: false,
+    timer: 0,
+    scoringTeam: '',
+    oldRed: 0,
+    oldBlue: 0
+};
+
+function drawGoalOverlay(dt) {
+    if (!goalOverlayState.active) return;
+    
+    goalOverlayState.timer += dt;
+    const t = goalOverlayState.timer;
+    
+    // Animation Timing
+    const animStart = 1.0; 
+    const animDuration = 0.8; 
+    
+    // Calculate interpolation 0..1
+    let progress = 0;
+    if (t > animStart) {
+        progress = (t - animStart) / animDuration;
+        if (progress > 1) progress = 1;
+    }
+    
+    // Ease out cubic
+    const ease = 1 - Math.pow(1 - progress, 3);
+    
+    ctx.save();
+    
+    // Darken background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, FIELD_WIDTH, FIELD_HEIGHT);
+    
+    const centerY = FIELD_HEIGHT / 2;
+    const centerX = FIELD_WIDTH / 2;
+    const offset = 200; 
+    const dropDist = 300;
+
+    // Helper to draw numbers
+    const drawNum = (num, x, y, color, alpha) => {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = `900 180px "Arial Black", "Arial", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 40;
+        ctx.lineWidth = 8;
+        ctx.strokeStyle = 'white';
+        ctx.strokeText(num, x, y);
+        ctx.fillStyle = color;
+        ctx.fillText(num, x, y);
+        ctx.restore();
+    };
+
+    // Draw "GOAL!" text
+    if (t < animStart + 0.5) {
+        ctx.save();
+        const scale = t < 0.2 ? t * 5 : 1; // Pop in
+        ctx.translate(centerX, centerY - 200);
+        ctx.scale(scale, scale);
+        ctx.font = `900 100px "Arial Black", "Arial", sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = goalOverlayState.scoringTeam === 'red' ? '#ff4444' : '#4444ff';
+        ctx.shadowBlur = 30;
+        ctx.fillText("¡GOL!", 0, 0);
+        ctx.restore();
+    }
+
+    // Draw Scores
+    // Static side
+    if (goalOverlayState.scoringTeam === 'red') {
+        // Blue is static
+        drawNum(goalOverlayState.oldBlue, centerX + offset, centerY, '#4444ff', 1);
+        
+        // Red animates
+        if (progress < 1) {
+             // Old falling
+             drawNum(goalOverlayState.oldRed, centerX - offset, centerY + (dropDist * ease), '#ff4444', 1 - ease);
+             // New dropping in
+             drawNum(scoreRed, centerX - offset, (centerY - dropDist) + (dropDist * ease), '#ff4444', ease);
+        } else {
+             drawNum(scoreRed, centerX - offset, centerY, '#ff4444', 1);
+        }
+    } else {
+        // Red is static
+        drawNum(goalOverlayState.oldRed, centerX - offset, centerY, '#ff4444', 1);
+        
+        // Blue animates
+        if (progress < 1) {
+             // Old falling
+             drawNum(goalOverlayState.oldBlue, centerX + offset, centerY + (dropDist * ease), '#4444ff', 1 - ease);
+             // New dropping in
+             drawNum(scoreBlue, centerX + offset, (centerY - dropDist) + (dropDist * ease), '#4444ff', ease);
+        } else {
+             drawNum(scoreBlue, centerX + offset, centerY, '#4444ff', 1);
+        }
+    }
+    
+    ctx.restore();
+}
+
+// Start countdown state
+let countdownActive = false;
+let countdownEndTime = 0;
+let countdownFlashUntil = 0;
+
+function triggerGoal(team) {
+    if (goalAnimating) return;
+    goalAnimating = true;
+    
+    // Setup Overlay
+    goalOverlayState.active = true;
+    goalOverlayState.timer = 0;
+    goalOverlayState.scoringTeam = team;
+    goalOverlayState.oldRed = team === 'red' ? scoreRed - 1 : scoreRed;
+    goalOverlayState.oldBlue = team === 'blue' ? scoreBlue - 1 : scoreBlue;
+
+    // Only spawn canvas-based explosion particles at the goal mouth
+    spawnGoalExplosion(team, ball ? ball.y : FIELD_HEIGHT/2);
+
+    // After animation duration, reset positions and clear particles
+    setTimeout(() => {
+        resetPositions();
+        // clear particles after reset
+        goalParticles.length = 0;
+        goalAnimating = false;
+        goalOverlayState.active = false;
+        updateScoreboard();
+    }, 3000);
+}
+
+// Goal explosion particle system (canvas)
+let goalParticles = [];
+
+function spawnGoalExplosion(team, y) {
+    const count = 40;
+    const dir = team === 'red' ? -1 : 1; // red scored on right -> explosion goes left into field
+    const centerX = team === 'red' ? FIELD_WIDTH : 0;
+    const centerY = Math.max(30, Math.min(FIELD_HEIGHT - 30, y || FIELD_HEIGHT/2));
+
+    for (let i = 0; i < count; i++) {
+        const angle = (Math.random() * Math.PI / 2) - Math.PI/4; // spread +/-45deg
+        const speed = 2 + Math.random() * 6;
+        const vx = Math.cos(angle) * speed * dir + (Math.random() - 0.5) * 1.5;
+        const vy = Math.sin(angle) * speed + (Math.random() - 0.5) * 1.5;
+        const life = 40 + Math.floor(Math.random() * 40); // frames-ish
+        const size = 4 + Math.random() * 6;
+        const colorChoice = Math.random();
+        const color = colorChoice < 0.45 ? '#ffcc00' : (colorChoice < 0.75 ? (team === 'red' ? '#ff4444' : '#4444ff') : '#ffffff');
+        goalParticles.push({ x: centerX, y: centerY, vx, vy, life, size, color, age: 0 });
+    }
+}
+
+function drawGoalParticles(deltaFrames) {
+    if (!goalParticles.length) return;
+
+    ctx.save();
+    // particles drawn in field coordinate space already
+    goalParticles.forEach(p => {
+        // update
+        const dt = Math.max(0.5, Math.min(4, deltaFrames));
+        p.x += p.vx * dt;
+        p.y += p.vy * dt + 0.5 * (p.age/20); // slight gravity over time
+        // slow down
+        p.vx *= 0.98;
+        p.vy *= 0.99;
+        p.age += dt;
+        p.life -= dt;
+
+        // draw
+        ctx.beginPath();
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life / 60));
+        ctx.ellipse(p.x, p.y, p.size, p.size * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.closePath();
+        ctx.globalAlpha = 1;
+    });
+    ctx.restore();
+
+    // remove dead
+    for (let i = goalParticles.length - 1; i >= 0; i--) {
+        if (goalParticles[i].life <= 0) goalParticles.splice(i, 1);
+    }
+}
+
+// Start countdown overlay and logic
+function startCountdown(seconds) {
+    countdownActive = true;
+    const now = performance.now();
+    countdownEndTime = now + Math.max(1, Math.floor(seconds)) * 1000;
+    countdownFlashUntil = 0;
+}
+
 // Input Listeners
 window.addEventListener('keydown', (e) => {
     if (e.key === 'w' || e.key === 'W') keys.w = true;
@@ -1396,89 +2034,205 @@ window.addEventListener('keyup', (e) => {
 });
 
 function drawField() {
-    // Draw Grass (Main Field)
-    ctx.fillStyle = '#4CAF50';
+    // Nuevo diseño estilo mesa de air hockey con estética metálica y neón
+    const goalTop = (FIELD_HEIGHT - GOAL_HEIGHT) / 2;
+    const goalBottom = goalTop + GOAL_HEIGHT;
+
+    // Fondo metálico del campo
+    const boardGrad = ctx.createLinearGradient(0, 0, 0, FIELD_HEIGHT);
+    boardGrad.addColorStop(0, '#3e444a');
+    boardGrad.addColorStop(0.5, '#2a2f33');
+    boardGrad.addColorStop(1, '#1c2023');
+    ctx.fillStyle = boardGrad;
     ctx.fillRect(0, 0, FIELD_WIDTH, FIELD_HEIGHT);
 
-    // Center line
-    ctx.beginPath();
-    ctx.moveTo(FIELD_WIDTH / 2, 0);
-    ctx.lineTo(FIELD_WIDTH / 2, FIELD_HEIGHT);
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.closePath();
-
-    // Center circle
-    ctx.beginPath();
-    ctx.arc(FIELD_WIDTH / 2, FIELD_HEIGHT / 2, 70, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.closePath();
-
-    // Field Border Lines
-    ctx.lineWidth = 4;
+    // Borde exterior con degradado neón
+    const borderGrad = ctx.createLinearGradient(0, 0, FIELD_WIDTH, 0);
+    borderGrad.addColorStop(0, 'rgba(0,234,255,0.85)');
+    borderGrad.addColorStop(0.5, 'rgba(184,255,59,0.55)');
+    borderGrad.addColorStop(1, 'rgba(255,43,214,0.85)');
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = borderGrad;
     ctx.strokeRect(0, 0, FIELD_WIDTH, FIELD_HEIGHT);
 
-    // Goals (Real Nets)
-    const goalTop = (FIELD_HEIGHT - GOAL_HEIGHT) / 2;
-    
-    // Fill Goal Floor with Grass
-    ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(-GOAL_DEPTH, goalTop, GOAL_DEPTH, GOAL_HEIGHT);
-    ctx.fillRect(FIELD_WIDTH, goalTop, GOAL_DEPTH, GOAL_HEIGHT);
+    // Borde interior tenue para efecto de profundidad
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeRect(3, 3, FIELD_WIDTH - 6, FIELD_HEIGHT - 6);
 
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 4;
+    // Línea central neón
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(FIELD_WIDTH / 2, 12);
+    ctx.lineTo(FIELD_WIDTH / 2, FIELD_HEIGHT - 12);
+    ctx.strokeStyle = 'rgba(0,234,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(0,234,255,0.6)';
+    ctx.shadowBlur = 10;
+    ctx.stroke();
+    ctx.restore();
 
-    // Left Goal
+    // Círculo central (face-off principal)
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(FIELD_WIDTH / 2, FIELD_HEIGHT / 2, 55, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,43,214,0.75)';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(255,43,214,0.6)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.restore();
+
+    // Punto central
+    ctx.beginPath();
+    ctx.arc(FIELD_WIDTH / 2, FIELD_HEIGHT / 2, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.shadowColor = 'rgba(255,255,255,0.9)';
+    ctx.shadowBlur = 6;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Semicírculos (áreas de portería) estilo air hockey
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, FIELD_HEIGHT / 2, 85, -Math.PI / 2, Math.PI / 2, false);
+    ctx.strokeStyle = 'rgba(0,234,255,0.6)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(0,234,255,0.5)';
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(FIELD_WIDTH, FIELD_HEIGHT / 2, 85, Math.PI / 2, -Math.PI / 2, false);
+    ctx.strokeStyle = 'rgba(255,43,214,0.6)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(255,43,214,0.5)';
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.restore();
+
+    // Aperturas de gol: línea vertical destacada
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(0, goalTop);
-    ctx.lineTo(-GOAL_DEPTH, goalTop);
-    ctx.lineTo(-GOAL_DEPTH, goalTop + GOAL_HEIGHT);
-    ctx.lineTo(0, goalTop + GOAL_HEIGHT);
-    ctx.stroke();
-    
-    // Net pattern (Left)
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    for (let i = 0; i <= GOAL_DEPTH; i += 10) {
-        ctx.beginPath();
-        ctx.moveTo(-i, goalTop);
-        ctx.lineTo(-i, goalTop + GOAL_HEIGHT);
-        ctx.stroke();
-    }
-    for (let i = 0; i <= GOAL_HEIGHT; i += 10) {
-        ctx.beginPath();
-        ctx.moveTo(0, goalTop + i);
-        ctx.lineTo(-GOAL_DEPTH, goalTop + i);
-        ctx.stroke();
-    }
-
-    // Right Goal
+    ctx.lineTo(0, goalBottom);
+    ctx.strokeStyle = 'rgba(0,234,255,0.85)';
     ctx.lineWidth = 4;
-    ctx.strokeStyle = 'white';
+    ctx.shadowColor = 'rgba(0,234,255,0.7)';
+    ctx.shadowBlur = 12;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(FIELD_WIDTH, goalTop);
-    ctx.lineTo(FIELD_WIDTH + GOAL_DEPTH, goalTop);
-    ctx.lineTo(FIELD_WIDTH + GOAL_DEPTH, goalTop + GOAL_HEIGHT);
-    ctx.lineTo(FIELD_WIDTH, goalTop + GOAL_HEIGHT);
+    ctx.lineTo(FIELD_WIDTH, goalBottom);
+    ctx.strokeStyle = 'rgba(255,43,214,0.85)';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = 'rgba(255,43,214,0.7)';
+    ctx.shadowBlur = 12;
     ctx.stroke();
+    ctx.restore();
 
-    // Net pattern (Right)
+    // Túneles de portería (hueco hacia afuera) para marcar claramente la zona de gol
+    // Izquierda
+    ctx.save();
+    const tunnelDepth = GOAL_DEPTH; // Usa profundidad existente lógica
+    const leftGrad = ctx.createLinearGradient(-tunnelDepth, 0, 0, 0);
+    leftGrad.addColorStop(0, '#0a0c0d');
+    leftGrad.addColorStop(0.4, '#14181b');
+    leftGrad.addColorStop(1, '#20262a');
+    ctx.fillStyle = leftGrad;
+    ctx.fillRect(-tunnelDepth, goalTop, tunnelDepth, GOAL_HEIGHT);
+
+    // Bordes internos con brillo tenue
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0,234,255,0.35)';
+    ctx.strokeRect(-tunnelDepth + 2, goalTop + 2, tunnelDepth - 4, GOAL_HEIGHT - 4);
+
+    // Rejilla sutil (líneas horizontales)
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    for (let i = 0; i <= GOAL_DEPTH; i += 10) {
+    for (let y = goalTop + 6; y < goalBottom - 6; y += 10) {
         ctx.beginPath();
-        ctx.moveTo(FIELD_WIDTH + i, goalTop);
-        ctx.lineTo(FIELD_WIDTH + i, goalTop + GOAL_HEIGHT);
+        ctx.moveTo(-tunnelDepth + 4, y);
+        ctx.lineTo(-4, y);
         ctx.stroke();
     }
-    for (let i = 0; i <= GOAL_HEIGHT; i += 10) {
+    // Líneas verticales muy tenues
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    for (let x = -tunnelDepth + 8; x < -8; x += 12) {
         ctx.beginPath();
-        ctx.moveTo(FIELD_WIDTH, goalTop + i);
-        ctx.lineTo(FIELD_WIDTH + GOAL_DEPTH, goalTop + i);
+        ctx.moveTo(x, goalTop + 4);
+        ctx.lineTo(x, goalBottom - 4);
         ctx.stroke();
     }
+
+    // Borde exterior del túnel con neón degradado
+    const leftRim = ctx.createLinearGradient(-tunnelDepth, 0, 0, 0);
+    leftRim.addColorStop(0, 'rgba(0,234,255,0.7)');
+    leftRim.addColorStop(1, 'rgba(0,234,255,0.15)');
+    ctx.beginPath();
+    ctx.strokeStyle = leftRim;
+    ctx.lineWidth = 3;
+    ctx.rect(-tunnelDepth, goalTop, tunnelDepth, GOAL_HEIGHT);
+    ctx.stroke();
+    ctx.restore();
+
+    // Derecha
+    ctx.save();
+    const rightGrad = ctx.createLinearGradient(FIELD_WIDTH, 0, FIELD_WIDTH + tunnelDepth, 0);
+    rightGrad.addColorStop(0, '#20262a');
+    rightGrad.addColorStop(0.6, '#14181b');
+    rightGrad.addColorStop(1, '#0a0c0d');
+    ctx.fillStyle = rightGrad;
+    ctx.fillRect(FIELD_WIDTH, goalTop, tunnelDepth, GOAL_HEIGHT);
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,43,214,0.35)';
+    ctx.strokeRect(FIELD_WIDTH + 2, goalTop + 2, tunnelDepth - 4, GOAL_HEIGHT - 4);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (let y = goalTop + 6; y < goalBottom - 6; y += 10) {
+        ctx.beginPath();
+        ctx.moveTo(FIELD_WIDTH + 4, y);
+        ctx.lineTo(FIELD_WIDTH + tunnelDepth - 4, y);
+        ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    for (let x = FIELD_WIDTH + 8; x < FIELD_WIDTH + tunnelDepth - 8; x += 12) {
+        ctx.beginPath();
+        ctx.moveTo(x, goalTop + 4);
+        ctx.lineTo(x, goalBottom - 4);
+        ctx.stroke();
+    }
+
+    const rightRim = ctx.createLinearGradient(FIELD_WIDTH, 0, FIELD_WIDTH + tunnelDepth, 0);
+    rightRim.addColorStop(0, 'rgba(255,43,214,0.7)');
+    rightRim.addColorStop(1, 'rgba(255,43,214,0.15)');
+    ctx.beginPath();
+    ctx.strokeStyle = rightRim;
+    ctx.lineWidth = 3;
+    ctx.rect(FIELD_WIDTH, goalTop, tunnelDepth, GOAL_HEIGHT);
+    ctx.stroke();
+    ctx.restore();
+
+    // Puntos de face-off adicionales (arriba y abajo del centro)
+    const faceOffOffsets = [FIELD_HEIGHT * 0.25, FIELD_HEIGHT * 0.75];
+    faceOffOffsets.forEach(y => {
+        ctx.beginPath();
+        ctx.arc(FIELD_WIDTH / 2, y, 32, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(184,255,59,0.55)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(FIELD_WIDTH / 2, y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fill();
+    });
 }
 
 // Start game
@@ -1563,7 +2317,15 @@ function gameLoop(timestamp) {
     ctx.scale(dpr, dpr);
     ctx.translate(FIELD_OFFSET_X, FIELD_OFFSET_Y);
     ctx.scale(renderScale, renderScale);
-    drawField();
+    const settingsVisible = document.getElementById('settings-overlay') && document.getElementById('settings-overlay').style.display !== 'none';
+    const menuVisible = document.getElementById('menu-overlay') && document.getElementById('menu-overlay').style.display !== 'none';
+    if (!gameRunning && (menuVisible || settingsVisible)) {
+        // Fondo plano cuando estamos en menú o ajustes
+        ctx.fillStyle = '#1e2125';
+        ctx.fillRect(0,0,FIELD_WIDTH,FIELD_HEIGHT);
+    } else {
+        drawField();
+    }
 
     if (!gameRunning) {
         ctx.restore();
@@ -1593,11 +2355,15 @@ function gameLoop(timestamp) {
         applyInterpolatedState();
     } else if (!isGameOver) {
         // Host / Local Logic
-        resolvePlayerCollisions(); // Prevent overlapping
-        ball.update(deltaTime);
-        players.forEach(player => {
-            player.update(ball, players, deltaTime);
-        });
+        if (!goalAnimating && !countdownActive) {
+            resolvePlayerCollisions(); // Prevent overlapping
+            ball.update(deltaTime);
+            players.forEach(player => {
+                player.update(ball, players, deltaTime);
+            });
+        } else {
+            // During goal animation: optionally make a soft net/glow effect by not updating physics
+        }
 
         // If Host, send state to client
         if (gameMode === 'host' && connections.length > 0) {
@@ -1634,6 +2400,50 @@ function gameLoop(timestamp) {
     players.forEach(player => {
         player.draw();
     });
+
+    // Draw goal explosion particles if any
+    if (goalAnimating || goalParticles.length) {
+        drawGoalParticles(deltaTime);
+    }
+
+    // Draw Goal Overlay
+    if (goalOverlayState.active) {
+        drawGoalOverlay(dtSeconds);
+    }
+
+    // Draw start countdown on the canvas (so it's always visible and above field)
+    if (countdownActive) {
+        const now = performance.now();
+        const msLeft = countdownEndTime - now;
+        if (msLeft > 0) {
+            const sec = Math.ceil(msLeft / 1000);
+            ctx.save();
+            
+            // Neon Style
+            const fontSize = Math.floor(150 * renderScale);
+            ctx.font = `900 ${fontSize}px "Arial Black", "Arial", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // Glow effect
+            ctx.shadowColor = '#efb710d7 '; 
+            ctx.shadowBlur = 20;
+        
+            
+            // Stroke
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = '#dba911ff ';
+            ctx.strokeText(sec.toString(), FIELD_WIDTH / 2, FIELD_HEIGHT / 2);
+            
+            // Fill
+            ctx.fillStyle = '#131313ff ';
+            ctx.fillText(sec.toString(), FIELD_WIDTH / 2, FIELD_HEIGHT / 2);
+            
+            ctx.restore();
+        } else {
+            countdownActive = false;
+        }
+    }
 
     ctx.restore();
 
@@ -1717,9 +2527,13 @@ function toggleMobileControls(forceShow) {
     if (forceShow || controls.style.display === 'none') {
         controls.style.display = 'flex';
         isMobile = true; // Enable logic
+        userSettings.showTouchControls = true;
+        saveSettings();
     } else {
         controls.style.display = 'none';
         isMobile = false;
+        userSettings.showTouchControls = false;
+        saveSettings();
     }
 }
 

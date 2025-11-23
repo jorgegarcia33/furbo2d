@@ -10,6 +10,7 @@
 <body>
     <div id="game-container">
         <button id="btn-fullscreen-toggle">⛶</button>
+        <button id="btn-open-settings" title="Ajustes">⚙</button>
         <div id="timer">00:00</div>
         <div id="scoreboard">
             <span id="score-red" class="score">0</span> - <span id="score-blue" class="score">0</span>
@@ -78,7 +79,9 @@
                 <button id="btn-back-menu" class="menu-btn small">Volver</button>
             </div>
 
-            <button id="btn-toggle-controls" class="menu-btn small" style="margin-top: 10px; font-size: 14px;">Mostrar/Ocultar Controles Táctiles</button>
+            <!-- Botón controles táctiles eliminado: ahora sólo en ajustes -->
+
+            <!-- (Panel de ajustes movido al overlay dedicado) -->
 
             <!-- Lobby Screen -->
             <div id="lobby-screen" style="display: none;">
@@ -123,6 +126,33 @@
             </div>
             <div id="action-area">
                 <button id="btn-kick">CHUTAR</button>
+            </div>
+        </div>
+        <!-- Settings Fullscreen Overlay -->
+        <div id="settings-overlay" style="display:none;">
+            <div class="settings-content">
+                <h2>Ajustes</h2>
+                <div class="settings-group">
+                    <label for="setting-username">Nombre de usuario</label>
+                    <input type="text" id="setting-username" maxlength="16" placeholder="Tu nombre" />
+                </div>
+                <div class="settings-group">
+                    <label for="setting-fav-number">Número favorito (1-25)</label>
+                    <input type="number" id="setting-fav-number" min="1" max="25" step="1" />
+                </div>
+                <div class="settings-group">
+                    <label>Controles táctiles</label>
+                    <label class="toggle" id="toggle-touch-wrapper">
+                        <input type="checkbox" id="setting-show-touch" />
+                        <span class="slider"></span>
+                        <span class="toggle-text">Activar</span>
+                    </label>
+                </div>
+                <div id="settings-error" class="settings-error" style="display:none;"></div>
+                <div class="settings-actions">
+                    <button id="btn-save-settings" class="menu-btn">Guardar</button>
+                    <button id="btn-close-settings" class="menu-btn small">Cerrar</button>
+                </div>
             </div>
         </div>
     </div>
